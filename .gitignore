@@ -1,14 +1,13 @@
-.asm
-.ini
-.log
-.cp
-.txt
-.bmk
-.brk
-.cfg
-.dbg
-.dct
-.dlt
-.lst
-.dic
-.mcl
+# Assembly / build / debug files
+*.ini
+*.log
+*.cp
+*.bmk
+*.brk
+*.cfg
+*.dbg
+*.dct
+*.dlt
+*.lst
+*.dic
+*.mcl
