@@ -64,7 +64,7 @@ boot16_delay_5ms
 brgh
 brgh_bit
 buzzer_active
-buzzer_timer
+buzzer_silenced
 byte2double
 c
 c_bit
@@ -234,7 +234,6 @@ go_not_done
 go_not_done_bit
 i2c_is_idle
 i2c_is_idle_ptr
-i2c_lcd_write
 i2c_read
 i2c_read_ptr
 i2c_restart
@@ -270,19 +269,18 @@ inte
 inte_bit
 intedg
 intedg_bit
+interrupt
+interrupt_init
 intf
 intf_bit
 irp
 irp_bit
 last_rh
 last_temp
-lcd_backlight
 lcd_chr
 lcd_cmd
 lcd_init_i2c
 lcd_out
-lcd_pulse
-lcd_send_nibble
 longint2double
 longword2double
 main
@@ -512,6 +510,7 @@ setfdz32
 setfov32
 setfun32
 setiov3224
+silence_buzzer
 smp
 smp_bit
 spbrg
@@ -694,6 +693,7 @@ txreg
 txsta
 ua
 ua_bit
+uart_checkcommand
 uart_init
 uart_send
 uart_sendstring

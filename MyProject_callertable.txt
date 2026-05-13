@@ -1,75 +1,54 @@
 main
 	__CC2DW
 		____DoICP
+	Interrupt_Init
 	UART_Init
 	I2C1_Init
 	Lcd_Init_I2C
-		Lcd_Send_Nibble
-			Lcd_Pulse
-				I2C_LCD_Write
-					I2C1_Start
-						I2C1_Is_Idle
-						____DoIFC
-					I2C1_Wr
-						____DoIFC
-					I2C1_Stop
+		Send_Nibble
+			I2C1_Start
+				I2C1_Is_Idle
+				____DoIFC
+			I2C1_Wr
+				____DoIFC
+			I2C1_Stop
 		Lcd_Cmd
-			Lcd_Send_Nibble
-				Lcd_Pulse
-					I2C_LCD_Write
-						I2C1_Start
-							I2C1_Is_Idle
-							____DoIFC
-						I2C1_Wr
-							____DoIFC
-						I2C1_Stop
+			Send_Nibble
+				I2C1_Start
+					I2C1_Is_Idle
+					____DoIFC
+				I2C1_Wr
+					____DoIFC
+				I2C1_Stop
 	Lcd_Out
 		Lcd_Chr
-			Lcd_Cmd
-				Lcd_Send_Nibble
-					Lcd_Pulse
-						I2C_LCD_Write
-							I2C1_Start
-								I2C1_Is_Idle
-								____DoIFC
-							I2C1_Wr
-								____DoIFC
-							I2C1_Stop
-			Lcd_Send_Nibble
-				Lcd_Pulse
-					I2C_LCD_Write
-						I2C1_Start
-							I2C1_Is_Idle
-							____DoIFC
-						I2C1_Wr
-							____DoIFC
-						I2C1_Stop
+			Send_Nibble
+				I2C1_Start
+					I2C1_Is_Idle
+					____DoIFC
+				I2C1_Wr
+					____DoIFC
+				I2C1_Stop
+	UART_CheckCommand
+		Silence_Buzzer
+		UART_SendString
+			UART_Send
 	dht11_init
 	find_response
 	read_dht11
 	Div_8X8_U
 	Lcd_Chr
-		Lcd_Cmd
-			Lcd_Send_Nibble
-				Lcd_Pulse
-					I2C_LCD_Write
-						I2C1_Start
-							I2C1_Is_Idle
-							____DoIFC
-						I2C1_Wr
-							____DoIFC
-						I2C1_Stop
-		Lcd_Send_Nibble
-			Lcd_Pulse
-				I2C_LCD_Write
-					I2C1_Start
-						I2C1_Is_Idle
-						____DoIFC
-					I2C1_Wr
-						____DoIFC
-					I2C1_Stop
+		Send_Nibble
+			I2C1_Start
+				I2C1_Is_Idle
+				____DoIFC
+			I2C1_Wr
+				____DoIFC
+			I2C1_Stop
 	Send_Sensors
 		UART_SendString
 			UART_Send
 		Div_8X8_U
 		UART_Send
+interrupt
+	Silence_Buzzer

@@ -12,16 +12,28 @@
 #define MQ2_Pin               RD7_bit
 #define MQ2_Direction         TRISD7_bit
 
-#define LED_Pin               RB0_bit
-#define LED_Direction         TRISB0_bit
+// LED on RB2
+#define LED_Pin               RB2_bit
+#define LED_Direction         TRISB2_bit
 
 #define BUZZER_Pin            RB1_bit
 #define BUZZER_Direction      TRISB1_bit
+
+// Push button on RB0 (INT0 pin)
+#define BUTTON_Pin            RB0_bit
+#define BUTTON_Direction      TRISB0_bit
 
 // ================================================
 //  CONFIG
 // ================================================
 #define GAS_ACTIVE_STATE 0
+
+// ================================================
+//  UART Command Definitions
+//  Raspberry Pi sends a single binary byte:
+//    0x01 (logic 1) -> Silence the buzzer (same as button press)
+// ================================================
+#define UART_CMD_SILENCE  0x01
 
 // ================================================
 //  Global Variables
@@ -47,9 +59,12 @@ unsigned int pir_led_timer = 0;
 // ================================================
 //  Buzzer Variables
 // ================================================
-unsigned int buzzer_timer = 0;
-unsigned char buzzer_active = 0;
-unsigned char alarm_latched = 0;
+// buzzer_active   : 1 = buzzer is currently ringing
+// alarm_latched   : 1 = alarm condition was seen (prevents re-trigger until cleared)
+// buzzer_silenced : 1 = user pressed button OR Pi sent 'S' to silence this alarm event
+unsigned char buzzer_active   = 0;
+unsigned char alarm_latched   = 0;
+unsigned char buzzer_silenced = 0;
 
 // ================================================
 //  Function Prototypes
@@ -62,7 +77,38 @@ void UART_Init();
 void UART_Send(char c);
 void UART_SendString(char *str);
 void Send_Sensors();
+void UART_CheckCommand();
 
+void Interrupt_Init();
+void Silence_Buzzer();
+
+// ================================================
+//  Silence_Buzzer
+//  Shared logic used by both the hardware INT0
+//  and the UART software command from the Pi.
+// ================================================
+void Silence_Buzzer() {
+
+    BUZZER_Pin      = 0;
+    buzzer_active   = 0;
+    buzzer_silenced = 1;
+}
+
+// ================================================
+//  INT0 Interrupt Service Routine
+//  Triggered on falling edge of RB0 (button press)
+//  -> silences the buzzer immediately
+// ================================================
+void interrupt() {
+
+    if(INTF_bit) {
+
+        Silence_Buzzer();
+
+        // Clear the interrupt flag
+        INTF_bit = 0;
+    }
+}
 
 // ================================================
 //  MAIN
@@ -72,16 +118,22 @@ void main() {
     ADCON1 = 0x07;
 
     // Sensor directions
-    PIR_Direction = 1;
-    MQ2_Direction = 1;
+    PIR_Direction    = 1;
+    MQ2_Direction    = 1;
 
-    // LED setup
+    // Push button: input on RB0
+    BUTTON_Direction = 1;
+
+    // LED setup on RB2
     LED_Direction = 0;
-    LED_Pin = 0;
+    LED_Pin       = 0;
 
     // Buzzer setup
     BUZZER_Direction = 0;
-    BUZZER_Pin = 0;
+    BUZZER_Pin       = 0;
+
+    // External Interrupt (INT0 on RB0)
+    Interrupt_Init();
 
     // UART Init
     UART_Init();
@@ -103,26 +155,29 @@ void main() {
     while(1) {
 
         // =====================================
+        // Check UART for Pi Commands FIRST
+        // so the Pi can silence the buzzer with
+        // minimal latency each loop iteration.
+        // =====================================
+        UART_CheckCommand();
+
+        // =====================================
         // Read Sensors
         // =====================================
         pir_state = PIR_Pin;
         mq2_raw   = MQ2_Pin;
 
         // =====================================
-        // PIR LED Logic
+        // PIR LED Logic  (LED on RB2)
         // =====================================
-        if(pir_state){
+        if(pir_state) {
 
-            // Turn LED ON
-            LED_Pin = 1;
-
-            // Reset timer
+            LED_Pin       = 1;
             pir_led_timer = 0;
         }
-        else{
+        else {
 
-            // Count no-motion time
-            if(pir_led_timer < 5000)
+            if(pir_led_timer < 3000)
                 pir_led_timer += 50;
             else
                 LED_Pin = 0;
@@ -131,7 +186,7 @@ void main() {
         // =====================================
         // PIR LCD Update
         // =====================================
-        if(pir_state != pir_last){
+        if(pir_state != pir_last) {
 
             if(pir_state)
                 Lcd_Out(1,12,"ON ");
@@ -146,7 +201,7 @@ void main() {
         // =====================================
         // GAS LCD Update
         // =====================================
-        if(mq2_raw != mq2_last){
+        if(mq2_raw != mq2_last) {
 
             if(mq2_raw == GAS_ACTIVE_STATE)
                 Lcd_Out(2,12,"ON ");
@@ -164,7 +219,7 @@ void main() {
         if(first_read || dht_timer >= 2000) {
 
             first_read = 0;
-            dht_timer = 0;
+            dht_timer  = 0;
 
             dht11_init();
             find_response();
@@ -183,12 +238,12 @@ void main() {
                                  Temp_byte_1 + Temp_byte_2) & 0xFF)) {
 
                     Temperature = Temp_byte_1;
-                    RH = RH_byte_1;
+                    RH          = RH_byte_1;
 
                     // =============================
                     // TEMP LCD Update
                     // =============================
-                    if(Temperature != last_temp){
+                    if(Temperature != last_temp) {
 
                         Lcd_Chr(1,3,(Temperature/10)+'0');
                         Lcd_Chr(1,4,(Temperature%10)+'0');
@@ -203,7 +258,7 @@ void main() {
                     // =============================
                     // HUMIDITY LCD Update
                     // =============================
-                    if(RH != last_rh){
+                    if(RH != last_rh) {
 
                         Lcd_Chr(2,3,(RH/10)+'0');
                         Lcd_Chr(2,4,(RH%10)+'0');
@@ -219,42 +274,39 @@ void main() {
 
         // =====================================
         // BUZZER TRIGGER LOGIC
+        // Buzzer rings CONTINUOUSLY until the
+        // user presses the button (INT0) OR the
+        // Raspberry Pi sends the 'S' command.
+        // It will not re-trigger while conditions
+        // persist AND buzzer_silenced is set.
         // =====================================
-        if( ((mq2_raw == GAS_ACTIVE_STATE) || (RH > 60))
-            && !alarm_latched ){
+        if( (mq2_raw == GAS_ACTIVE_STATE) || (RH > 70) ) {
 
-            BUZZER_Pin = 1;
+            if(!alarm_latched) {
 
-            buzzer_active = 1;
+                // Fresh alarm event -> start buzzer
+                BUZZER_Pin      = 1;
+                buzzer_active   = 1;
+                buzzer_silenced = 0;
+                alarm_latched   = 1;
+            }
+            else if(!buzzer_silenced && !buzzer_active) {
 
-            buzzer_timer = 0;
-
-            alarm_latched = 1;
-        }
-
-        // Reset latch when alarm conditions disappear
-        if( (mq2_raw != GAS_ACTIVE_STATE) && (RH <= 60) ){
-
-            alarm_latched = 0;
-        }
-
-        // =====================================
-        // BUZZER TIMER
-        // =====================================
-        if(buzzer_active){
-
-            buzzer_timer += 50;
-
-            if(buzzer_timer >= 3000){
-
-                BUZZER_Pin = 0;
-
-                buzzer_active = 0;
+                // Was active but stopped without silence command -> re-arm
+                BUZZER_Pin    = 1;
+                buzzer_active = 1;
             }
         }
+        else {
+
+            // Alarm conditions fully gone -> reset latch & silence flag
+            // so the next alarm event starts fresh
+            alarm_latched   = 0;
+            buzzer_silenced = 0;
+        }
 
         // =====================================
-        // UART Send
+        // UART Send all sensor data + buzzer status
         // =====================================
         Send_Sensors();
 
@@ -265,6 +317,21 @@ void main() {
 
         dht_timer += 50;
     }
+}
+
+// ================================================
+//  INTERRUPT INIT
+//  INT0 on RB0, falling edge (button pulls low)
+// ================================================
+void Interrupt_Init() {
+
+    BUTTON_Direction = 1;   // RB0 as input
+
+    INTEDG_bit = 0;         // Trigger on falling edge (button press = GND)
+    INTF_bit   = 0;         // Clear any pending INT0 flag
+    INTE_bit   = 1;         // Enable INT0
+
+    GIE_bit    = 1;         // Enable global interrupts
 }
 
 // ================================================
@@ -332,15 +399,15 @@ char read_dht11() {
 // ================================================
 void UART_Init() {
 
-    TRISC6_bit = 0;
-    TRISC7_bit = 1;
+    TRISC6_bit = 0;     // TX -> output
+    TRISC7_bit = 1;     // RX -> input
 
-    SPBRG = 129;
+    SPBRG = 129;        // 20 MHz -> 9600 baud (BRGH=1)
 
     BRGH_bit = 1;
     TXEN_bit = 1;
     SPEN_bit = 1;
-    CREN_bit = 1;
+    CREN_bit = 1;       // Enable continuous receive
 }
 
 void UART_Send(char c) {
@@ -356,6 +423,54 @@ void UART_SendString(char *str) {
         UART_Send(*str++);
 }
 
+// ================================================
+//  UART_CheckCommand
+//  Non-blocking RX poll. Called once per main loop.
+//  Handles commands sent FROM the Raspberry Pi:
+//
+//    'S' -> Silence buzzer (software interrupt)
+//
+//  The PIC acknowledges each valid command back
+//  to the Pi so it can confirm receipt.
+// ================================================
+void UART_CheckCommand() {
+
+    char cmd;
+
+    // RCIF is set when the USART receive buffer has data
+    if(RCIF_bit) {
+
+        cmd = RCREG;    // Reading RCREG clears RCIF automatically
+
+        if(cmd == UART_CMD_SILENCE) {
+
+            // Software "interrupt" from Pi -> identical effect
+            // to the physical button press on RB0 (INT0)
+            Silence_Buzzer();
+
+            // Acknowledge back to Pi
+            UART_SendString("ACK:SILENCE\n");
+        }
+        // Unknown commands are silently ignored.
+        // Extend here with more 'else if' cases as needed.
+    }
+}
+
+// ================================================
+//  Send_Sensors
+//  Transmits one CSV line per call:
+//
+//  Format:
+//    T:XX,H:XX,PIR:X,GAS:X,BUZ:X\n
+//
+//  Field   Values
+//  ------  ------
+//  T       Temperature (°C), two digits
+//  H       Humidity (%),     two digits
+//  PIR     0 = no motion,  1 = motion detected
+//  GAS     0 = gas present (active LOW), 1 = clear
+//  BUZ     0 = buzzer OFF, 1 = buzzer ON (alarm ringing)
+// ================================================
 void Send_Sensors() {
 
     UART_SendString("T:");
@@ -371,6 +486,10 @@ void Send_Sensors() {
 
     UART_SendString(",GAS:");
     UART_Send(mq2_raw + '0');
+
+    // NEW: Buzzer status field
+    UART_SendString(",BUZ:");
+    UART_Send(buzzer_active + '0');
 
     UART_Send('\n');
 }

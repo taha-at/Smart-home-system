@@ -12,7 +12,7 @@ void Lcd_Init_I2C();
 void Lcd_Cmd(unsigned char cmd);
 void Lcd_Chr(unsigned char row, unsigned char col, char out_char);
 void Lcd_Out(unsigned char row, unsigned char col, char *text);
-#line 29 "C:/Users/AbdElrahman/Downloads/Smart-home-system-main (1)/Smart-home-system-main/main.c"
+#line 41 "C:/Users/AbdElrahman/Downloads/Smart-home-system-main (1)/Smart-home-system-main/main.c"
 unsigned char Check_bit, Temp_byte_1, Temp_byte_2;
 unsigned char RH_byte_1, RH_byte_2;
 unsigned char Temperature = 0, RH = 0, Sumation;
@@ -34,9 +34,12 @@ unsigned int pir_led_timer = 0;
 
 
 
-unsigned int buzzer_timer = 0;
+
+
+
 unsigned char buzzer_active = 0;
 unsigned char alarm_latched = 0;
+unsigned char buzzer_silenced = 0;
 
 
 
@@ -49,7 +52,38 @@ void UART_Init();
 void UART_Send(char c);
 void UART_SendString(char *str);
 void Send_Sensors();
+void UART_CheckCommand();
 
+void Interrupt_Init();
+void Silence_Buzzer();
+
+
+
+
+
+
+void Silence_Buzzer() {
+
+  RB1_bit  = 0;
+ buzzer_active = 0;
+ buzzer_silenced = 1;
+}
+
+
+
+
+
+
+void interrupt() {
+
+ if(INTF_bit) {
+
+ Silence_Buzzer();
+
+
+ INTF_bit = 0;
+ }
+}
 
 
 
@@ -63,12 +97,18 @@ void main() {
   TRISD7_bit  = 1;
 
 
-  TRISB0_bit  = 0;
-  RB0_bit  = 0;
+  TRISB0_bit  = 1;
+
+
+  TRISB2_bit  = 0;
+  RB2_bit  = 0;
 
 
   TRISB1_bit  = 0;
   RB1_bit  = 0;
+
+
+ Interrupt_Init();
 
 
  UART_Init();
@@ -92,33 +132,36 @@ void main() {
 
 
 
+
+
+ UART_CheckCommand();
+
+
+
+
  pir_state =  RD6_bit ;
  mq2_raw =  RD7_bit ;
 
 
 
 
- if(pir_state){
+ if(pir_state) {
 
-
-  RB0_bit  = 1;
-
-
+  RB2_bit  = 1;
  pir_led_timer = 0;
  }
- else{
+ else {
 
-
- if(pir_led_timer < 5000)
+ if(pir_led_timer < 3000)
  pir_led_timer += 50;
  else
-  RB0_bit  = 0;
+  RB2_bit  = 0;
  }
 
 
 
 
- if(pir_state != pir_last){
+ if(pir_state != pir_last) {
 
  if(pir_state)
  Lcd_Out(1,12,"ON ");
@@ -133,7 +176,7 @@ void main() {
 
 
 
- if(mq2_raw != mq2_last){
+ if(mq2_raw != mq2_last) {
 
  if(mq2_raw ==  0 )
  Lcd_Out(2,12,"ON ");
@@ -175,7 +218,7 @@ void main() {
 
 
 
- if(Temperature != last_temp){
+ if(Temperature != last_temp) {
 
  Lcd_Chr(1,3,(Temperature/10)+'0');
  Lcd_Chr(1,4,(Temperature%10)+'0');
@@ -190,7 +233,7 @@ void main() {
 
 
 
- if(RH != last_rh){
+ if(RH != last_rh) {
 
  Lcd_Chr(2,3,(RH/10)+'0');
  Lcd_Chr(2,4,(RH%10)+'0');
@@ -207,37 +250,34 @@ void main() {
 
 
 
- if( ((mq2_raw ==  0 ) || (RH > 60))
- && !alarm_latched ){
+
+
+
+
+
+ if( (mq2_raw ==  0 ) || (RH > 70) ) {
+
+ if(!alarm_latched) {
+
 
   RB1_bit  = 1;
-
  buzzer_active = 1;
-
- buzzer_timer = 0;
-
+ buzzer_silenced = 0;
  alarm_latched = 1;
  }
+ else if(!buzzer_silenced && !buzzer_active) {
 
 
- if( (mq2_raw !=  0 ) && (RH <= 60) ){
+  RB1_bit  = 1;
+ buzzer_active = 1;
+ }
+ }
+ else {
+
+
 
  alarm_latched = 0;
- }
-
-
-
-
- if(buzzer_active){
-
- buzzer_timer += 50;
-
- if(buzzer_timer >= 3000){
-
-  RB1_bit  = 0;
-
- buzzer_active = 0;
- }
+ buzzer_silenced = 0;
  }
 
 
@@ -252,6 +292,21 @@ void main() {
 
  dht_timer += 50;
  }
+}
+
+
+
+
+
+void Interrupt_Init() {
+
+  TRISB0_bit  = 1;
+
+ INTEDG_bit = 0;
+ INTF_bit = 0;
+ INTE_bit = 1;
+
+ GIE_bit = 1;
 }
 
 
@@ -342,7 +397,30 @@ void UART_SendString(char *str) {
  while(*str)
  UART_Send(*str++);
 }
+#line 436 "C:/Users/AbdElrahman/Downloads/Smart-home-system-main (1)/Smart-home-system-main/main.c"
+void UART_CheckCommand() {
 
+ char cmd;
+
+
+ if(RCIF_bit) {
+
+ cmd = RCREG;
+
+ if(cmd ==  0x01 ) {
+
+
+
+ Silence_Buzzer();
+
+
+ UART_SendString("ACK:SILENCE\n");
+ }
+
+
+ }
+}
+#line 474 "C:/Users/AbdElrahman/Downloads/Smart-home-system-main (1)/Smart-home-system-main/main.c"
 void Send_Sensors() {
 
  UART_SendString("T:");
@@ -358,6 +436,10 @@ void Send_Sensors() {
 
  UART_SendString(",GAS:");
  UART_Send(mq2_raw + '0');
+
+
+ UART_SendString(",BUZ:");
+ UART_Send(buzzer_active + '0');
 
  UART_Send('\n');
 }
